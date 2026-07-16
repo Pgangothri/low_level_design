@@ -1,0 +1,306 @@
+C++
+|
+Java
+|
+Python
+Introduction
+In concurrent programming, managing threads can quickly become complicated. While threads provide a way to execute multiple tasks simultaneously, creating and managing threads manually is often inefficient and error-prone in real-world systems. Let's understand this with the help of an example.
+Understanding
+Imagine building a ride-matching system like Uber, where the system needs to handle requests from drivers and riders simultaneously. Each time a rider requests a ride, the system has to find an available driver. To do this efficiently, the system may need to handle multiple tasks concurrently, such as processing requests, matching riders with drivers, updating their statuses, and sending notifications.
+
+In a simple approach, you might decide to create a new thread every time a ride request comes in, so each request gets processed independently. The code implementing this approach is given below:
+Python
+
+
+import threading
+import time
+
+# Ride Matching Service - each request spawns a raw thread
+class RideMatchingService:
+    def request_ride(self, rider_id):
+        def match():
+            print(f"Matching rider {rider_id} to a driver...")
+            time.sleep(1)  # Simulate 1-second matching process
+            print(f"Ride matched for rider {rider_id}")
+
+        match_thread = threading.Thread(target=match)
+        match_thread.start()
+        return match_thread  # Caller must join manually
+
+ride_service1 = RideMatchingService()
+ride_service2 = RideMatchingService()
+
+t1 = ride_service1.request_ride("Raj")
+print("task1 running...")
+
+t2 = ride_service2.request_ride("John Doe")
+print("task2 running...")
+
+t1.join()
+t2.join()
+
+While this seems like a good idea at first, creating and managing a large number of threads can quickly become a nightmare as the system scales. Let's formally understand why creating threads manually in real-world systems is problematic.
+Issues while Creating Threads Manually in Real-World Systems
+Thread Explosion: Creating a new thread for each task can quickly lead to an excessive number of threads, overwhelming the system and degrading performance.
+Memory Issue: Each thread consumes system memory. Creating too many threads can lead to memory exhaustion, causing crashes or slowdowns.
+Thread Leaks: Failing to properly join or terminate threads results in thread leaks, where unused threads continue consuming resources.
+Context Switching Overhead: Managing too many threads increases context switching overhead, where the system saves and restores thread states. This reduces overall efficiency.
+GIL Limitation: In CPython, the Global Interpreter Lock (GIL) limits true parallelism for CPU-bound tasks. For I/O-bound tasks, threads remain effective, but the GIL must be kept in mind when designing concurrent systems.
+
+A Better Approach: Thread Pools
+A better approach is to use Thread Pools, where a fixed number of threads are available to handle tasks.
+Real-life Analogy
+This is similar to hiring a set number of chefs for a kitchen: instead of hiring a new chef every time an order comes in, you use your existing chefs efficiently to handle multiple orders as they come in. This ensures that resources are optimized and the kitchen (or system) runs smoothly without overloading.
+
+The concurrent.futures Module
+Python's concurrent.futures module (available since Python 3.2) provides a high-level, easy-to-use interface for managing thread pools and process pools. It decouples:
+Task Submission: What you want to do.
+Task Execution: How and when it runs.
+
+This separation lets you manage threads efficiently without manually creating or joining them. The module's key components are:
+
+1. Executor (Abstract Base Class)
+Executor is the abstract base class for all executors. It defines the core interface:
+submit(fn, *args, **kwargs): Schedules the callable fn to run asynchronously and returns a Future representing the pending result.
+map(fn, *iterables): Applies fn to each item in the iterable concurrently and returns results in order.
+shutdown(wait=True): Signals the executor to free resources when done. If wait=True, it blocks until all pending tasks finish.
+
+2. ThreadPoolExecutor
+ThreadPoolExecutor is a concrete implementation of Executor that uses a pool of threads to execute calls asynchronously. It is the primary tool for I/O-bound concurrent tasks in Python.
+Key Parameters:
+max_workers: The maximum number of threads in the pool. Defaults to min(32, os.cpu_count() + 4) in Python 3.8+.
+thread_name_prefix: An optional prefix for thread names, useful for debugging.
+
+3. Future Object
+A Future object represents the result of an asynchronous computation. It is returned by submit() and provides methods to check status and retrieve results.
+
+Code
+Here's a code snippet using ThreadPoolExecutor to handle email sending tasks efficiently.
+Python
+
+
+import concurrent.futures
+import time
+import threading
+
+def send_email(recipient):
+    print(f"Sending email to {recipient} on {threading.current_thread().name}")
+    time.sleep(1)  # Simulate delay
+    print(f"Email sent to {recipient}")
+
+# Using ThreadPoolExecutor with 10 threads
+with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    for i in range(1, 26):
+        recipient = f"user{i}@gmail.com"
+        executor.submit(send_email, recipient)
+
+# Executor is automatically shut down when exiting the 'with' block,
+# waiting for all submitted tasks to complete.
+Understanding
+ThreadPoolExecutor(max_workers=10)
+Creates a thread pool with up to 10 worker threads. The pool is ready to accept tasks immediately.
+executor.submit(send_email, recipient)
+Submits send_email as a task with recipient as its argument. A worker thread picks it up and runs it. The call is non-blocking - the main thread continues immediately.
+time.sleep(1)
+Simulates some dummy work (like sending an email). The thread sleeps for 1 second to simulate the time it takes to send an email.
+The with statement
+Acts as a graceful shutdown mechanism. On exiting the block, executor.shutdown(wait=True) is called automatically, ensuring all submitted tasks finish before the program continues.
+
+Why Use ThreadPoolExecutor?
+Simplified Thread Management: Thread creation, pooling, and cleanup are handled internally, reducing boilerplate.
+Efficient Resource Management: Threads are reused across tasks, avoiding repeated creation and destruction overhead.
+Graceful Shutdown: The with statement or shutdown() call ensures all tasks complete before resources are released.
+
+Methods to Submit Tasks
+ThreadPoolExecutor provides two primary methods to submit tasks for execution. Understanding the difference helps you choose the right one for each use case.
+1. submit() Method
+Purpose: Submits a single callable with optional arguments for asynchronous execution.
+Return Type: Returns a Future object that represents the pending result.
+Usage: Ideal when you need fine-grained control over individual tasks, want to retrieve their results, or need to handle exceptions per task.
+
+This is the method used in the previous section.
+2. map() Method
+Purpose: Submits the same callable for each item in an iterable, running all calls concurrently.
+Return Type: Returns an iterator that yields results in the same order as the input iterable (not the order of completion).
+Usage: Ideal for applying the same function to a batch of inputs, similar to the built-in map() but concurrent.
+
+Let's understand the submit() method with a return-value example in the next section.
+When to Use Each:
+submit() is best used when tasks are heterogeneous, you need individual results, or you need to handle per-task exceptions.
+map() is best used when applying the same function to a homogeneous batch of inputs and result order matters.
+
+submit() and Future
+In this section, we'll break down how the submit() method works and how it interacts with the Future object to manage task results. Let's understand this better through the code below:
+Python
+
+
+import concurrent.futures
+import time
+
+def compute():
+    time.sleep(1)
+    return 77
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    future = executor.submit(compute)
+
+    print("Doing other work...")
+
+    result = future.result()  # Blocks until result is ready
+    print(f"Result: {result}")
+
+# Executor shuts down automatically on 'with' block exit
+Key Concepts to Understand:
+1. submit() Method
+The submit() method accepts any callable along with its positional and keyword arguments. It schedules the callable for execution and returns a Future immediately without blocking.
+It works with any callable - plain functions, lambdas, methods, or class instances with __call__ defined.
+2. Future Object
+The Future object represents the result of an asynchronous computation. It allows you to:
+Track the completion of the task using done().
+Get the result using result(), which blocks the calling thread until the task finishes.
+Cancel the task (if it hasn't started) using cancel().
+Get the exception raised by the task (if any) using exception().
+3. result() Method
+The result() method is blocking - it pauses the calling thread until the task has finished executing and the return value is available.
+If the task has already completed, result() returns the value immediately.
+If the task raised an exception, result() re-raises that exception in the calling thread.
+An optional timeout argument can be passed: result(timeout=5) raises TimeoutError if the task doesn't finish within 5 seconds.
+4. Waiting for Multiple Futures
+concurrent.futures also provides as_completed() and wait() to handle multiple futures efficiently:
+Python
+
+
+import concurrent.futures
+import time
+
+def task(n):
+    time.sleep(n)
+    return n * n
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    futures = [executor.submit(task, i) for i in range(1, 5)]
+
+    # Process results as each task completes (not necessarily in order)
+    for future in concurrent.futures.as_completed(futures):
+        print(f"Result: {future.result()}")
+
+# map() alternative - preserves input order
+# results = list(executor.map(task, range(1, 5)))
+
+Why Use submit() and Future?
+Asynchronous Task Execution: submit() allows tasks to run without blocking the main thread, enabling background processing such as I/O, network calls, or database queries.
+Result Handling: The Future object provides a clean interface to retrieve results, handle exceptions, and check task status.
+Control and Flexibility: You can cancel tasks, set timeouts, and react to completions in any order using as_completed().
+
+Shutdown Methods in ThreadPoolExecutor
+ThreadPoolExecutor provides control over when and how tasks stop being accepted and when threads are released. The key method is shutdown(), with behavior configurable via its arguments.
+1. Graceful Shutdown (shutdown(wait=True))
+Python
+
+
+executor.shutdown(wait=True)
+Purpose: Signals the executor to stop accepting new tasks and waits for all submitted tasks to complete before returning.
+Return Type: None.
+Usage: This is the default behavior of the with statement. Use it when you want the program to wait for all tasks to finish before proceeding.
+2. Non-blocking Shutdown (shutdown(wait=False))
+Python
+
+
+executor.shutdown(wait=False)
+Purpose: Signals the executor not to accept new tasks, but returns immediately without waiting for running tasks to complete. Threads will still finish their current work.
+Return Type: None.
+Usage: Use when you want to continue doing other work while remaining tasks run in the background.
+3. Cancel Pending Tasks (cancel_futures=True, Python 3.9+)
+Python
+
+
+executor.shutdown(wait=True, cancel_futures=True)
+Purpose: Cancels all pending futures that have not yet started executing, then waits for any currently running tasks to finish.
+Return Type: None.
+Usage: Use this for an immediate-style shutdown where queued but unstarted tasks should be discarded.
+
+Thread Starvation and Fairness
+In multi-threaded systems, thread starvation and fairness are key concepts that ensure threads are scheduled properly without some being unfairly blocked or neglected.
+Thread Starvation
+Thread starvation occurs when a thread is perpetually unable to access the resources it needs for execution due to high contention, often caused by prioritizing certain threads over others. As a result, some threads or tasks may never get a chance to execute.
+Causes of Thread Starvation:
+Blocking I/O in All Workers: If all threads in the pool are blocked on slow I/O or network calls, no threads are available to pick up new tasks.
+Infinite Blocking: Tasks that acquire locks and never release them can starve other threads waiting for those locks.
+Lack of Fair Scheduling: The operating system's scheduler may favor certain threads over others, causing starvation under heavy load.
+
+Fairness in Thread Scheduling
+Fairness ensures that all threads get an opportunity to execute, preventing some threads from being permanently blocked. Python's ThreadPoolExecutor uses an internal FIFO queue, so tasks are generally picked up in submission order, which provides a basic level of fairness.
+Fixes for Thread Starvation
+Increasing max_workers to ensure enough threads are available for pending tasks
+Breaking long-running tasks into smaller units
+Avoiding holding threading.Lock objects for extended periods
+Using asyncio for I/O-bound concurrency instead of threads when extreme scalability is needed
+Leveraging ProcessPoolExecutor for CPU-bound tasks to bypass the GIL entirely
+
+Fixed vs Cached vs Scheduled Thread Pools
+Python's ThreadPoolExecutor can be configured and used in different ways depending on the workload. Here are the three most common usage patterns.
+1. Fixed Thread Pool
+A Fixed Thread Pool is created by specifying an explicit max_workers value. The pool never creates more than this many threads, regardless of how many tasks are submitted.
+Use Case:
+Applications where the concurrency level is known in advance, such as processing a fixed batch of files or handling a bounded number of simultaneous network connections.
+Advantages:
+Predictable resource usage: Thread count is bounded, so memory consumption is controlled.
+Better control: Prevents the system from being overloaded by runaway thread creation.
+Disadvantages:
+Limited scalability: If all threads are busy and the task queue is long, tasks wait and latency increases.
+Potential underutilization: If fewer tasks exist than threads, some threads sit idle.
+
+2. Dynamic (Cached) Thread Pool
+When max_workers is not set (or set to None), ThreadPoolExecutor uses a default value that scales with CPU count (min(32, os.cpu_count() + 4) in Python 3.8+). While Python does not offer a truly unbounded cached pool like some runtimes, you can emulate dynamic behavior by setting a generous max_workers limit.
+Use Case:
+Handling bursty or unpredictable I/O-bound workloads, such as scraping multiple URLs or processing incoming webhook events.
+Advantages:
+Scalable within limits: The pool can utilize more threads during high-demand periods.
+Efficient resource use: Idle threads are cleaned up by the interpreter when the executor shuts down.
+Disadvantages:
+Less predictable resource usage: Under heavy load, the pool may create many threads, consuming significant memory.
+GIL constraint: For CPU-bound tasks, the GIL limits actual parallelism regardless of thread count.
+
+3. Scheduled Task Execution
+Python provides the sched module and the threading.Timer class for scheduling tasks. For periodic execution combined with a thread pool, you can use a recurring threading.Timer pattern. An even more convenient option is the third-party schedule library, but the standard library approach is shown below:
+
+Python
+
+
+import threading
+import time
+
+def schedule_at_fixed_rate(task, interval_seconds):
+    def loop():
+        while not stop_event.is_set():
+            task()
+            time.sleep(interval_seconds)
+    stop_event = threading.Event()
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+    return stop_event  # Caller can call stop_event.set() to stop
+
+def cleanup_sessions():
+    print("Cleaning up expired sessions...")
+
+stop = schedule_at_fixed_rate(cleanup_sessions, 5)
+time.sleep(20)  # Let it run for 20 seconds
+stop.set()       # Signal the loop to stop
+Explanation:
+A session-cleaning task is scheduled to run every 5 seconds. A background daemon thread runs a loop that executes the task and then sleeps for the configured interval. A threading.Event is used to signal the loop to stop cleanly.
+Use Case:
+Applications that need periodic background maintenance, such as cache invalidation, heartbeat signals, or scheduled data synchronization.
+Advantages:
+Task scheduling: Achieves delay-based and interval-based execution using only the standard library.
+Clean shutdown: The threading.Event stop flag provides a safe and cooperative termination mechanism.
+Disadvantages:
+Thread per schedule: Each scheduled task requires its own thread, which does not scale well for a large number of distinct schedules.
+No built-in jitter or backoff: Managing missed executions or drift requires additional logic.
+
+29
+
+
+
+
+
+Thread Pools and Executors - Theory - TUF+

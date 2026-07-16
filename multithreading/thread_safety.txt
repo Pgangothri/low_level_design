@@ -1,0 +1,286 @@
+C++
+|
+Java
+|
+Python
+Introduction
+In today's world, almost every app or system does many things at once. Whether it's a web server handling hundreds of users simultaneously, or a desktop app loading content while you're scrolling - everything is happening together, side by side.
+
+But when many things run at once, they often bump into each other. Imagine a busy kitchen with several chefs working on the same dish without talking to each other. What happens? Confusion, mistakes, and maybe even a spoiled meal. The same kind of chaos can happen in software if things aren't managed properly.
+
+This article is about that hidden chaos, and how we can bring order to it. We'll explore what really goes on behind the scenes when different parts of a program run at the same time, and how to make sure they don't get in each other's way.
+
+Thread Safety
+Thread safety means that a piece of code, object, or function works correctly and consistently when used by multiple threads at the same time. It makes sure that no wrong result is produced and no data gets corrupted - even if many threads are accessing or changing the same thing.
+
+In simple words, thread safety ensures everything stays in order, even when many things are happening at once.
+Real-life Analogy: TUF+ Purchase Counter
+Imagine a TUF+ sale going live. Hundreds of users try to buy the premium version at the same time. There's a counter keeping track of how many purchases have happened.
+
+If two users hit "Buy" at the same time, and the counter isn't protected, both may see the same count and increase it incorrectly - leading to messed-up records or over-selling.
+
+Thread safety ensures that the purchase counter is updated properly, no matter how many users are trying to buy at once.
+Why it Matters
+Without thread safety, apps can behave unpredictably. Bugs appear that are hard to track, and things break randomly. That's why making code thread-safe is a must when multiple threads or users are involved.
+Note on the GIL
+Python's CPython interpreter has a Global Interpreter Lock (GIL), which prevents multiple threads from executing Python bytecode truly in parallel. This means that for pure CPU-bound operations, the GIL provides some natural protection. However, race conditions can and do still occur - the GIL is released during I/O operations, C extension calls, and between bytecodes, making shared state unsafe without explicit synchronization.
+
+Race Condition
+When two or more tasks reach for the same data at the same moment, the first one to finish "wins," and the final result depends on sheer timing - not on logic. That timing lottery is called a race condition.
+Real Life Analogy
+Picture two cashiers writing today's sales total on a whiteboard. Each walks up, reads "₹ 10,000," adds "+₹1,000," and writes "₹11,000." They never saw the other cashier's update, so one sale is lost. The number you read depends on who grabbed the marker last.
+Understanding
+Let's understand this better with the help of a code example where two threads are incrementing the same counter at the same time, racing to update the shared value without coordination.
+Python
+
+
+import threading
+
+# Purchase counter with no protection
+class PurchaseCounter:
+    def __init__(self):
+        # Shared count value
+        self.count = 0
+
+    def increment(self):
+        # READ current value
+        # INCREMENT it
+        # WRITE it back
+        self.count += 1          # <-- not atomic at Python level, unsafe
+
+    def get_count(self):
+        return self.count
+
+counter = PurchaseCounter()
+
+# Task that bumps the counter 1000 times
+def task():
+    for _ in range(1000):
+        counter.increment()
+
+# Run the same task in two threads
+t1 = threading.Thread(target=task)
+t2 = threading.Thread(target=task)
+t1.start(); t2.start()
+t1.join(); t2.join()
+
+# Expect 2000, but may get less
+print(f"Final Count: {counter.get_count()}")
+
+When you run the above code, you won't always get the expected output. Ideally, the result should be 2000, since both threads are supposed to increment the counter 1000 times each.
+
+However, you may occasionally get a smaller number, because the GIL can be released between the read and write steps of self.count += 1, allowing interference.
+Why the output is Inconsistent?
+self.count += 1 is not a single bytecode operation - it involves a LOAD, an INCREMENT, and a STORE.
+If the GIL is released between these steps, another thread can read the old value and compute the same result, causing a lost update.
+With many interleavings, the final count can land anywhere below 2000.
+Wrap-up
+Race conditions hide in plain sight and only appear under load - exactly when reliability matters most. In the next sections, we'll see how synchronization tools (locks, atomic types from threading, etc.) eliminate these timing hazards while keeping our code fast and correct.
+
+threading.Lock
+Why We Need It
+We just saw how two threads can clash over the same data. To stop that clash, Python's threading module offers threading.Lock - a mutual exclusion primitive that lets only one thread touch a critical section at a time.
+How it Fixes Race Condition
+When a thread calls acquire() on a lock, it gains exclusive access to the protected section.
+If the lock is available: the thread acquires it and safely runs the code inside.
+If the lock is already held by another thread: the calling thread blocks until the lock is released.
+
+This way, only one thread at a time can execute the protected section, which avoids conflicts and ensures thread safety.
+
+Let us now understand the two common patterns of using threading.Lock.
+1. Manual acquire() / release()
+Python
+
+
+import threading
+
+class SafeCounter:
+    def __init__(self):
+        self.count = 0
+        self.lock = threading.Lock()
+
+    def increment(self):
+        self.lock.acquire()
+        self.count += 1          # protected by the lock
+        self.lock.release()
+
+    def get_count(self):
+        return self.count
+Only one thread can hold the lock at a time. Others block at acquire() until it is released.
+Risk: If an exception is raised between acquire() and release(), the lock is never released, causing a deadlock.
+Drawback
+Manually calling acquire() and release() is error-prone. An exception or early return can easily leave the lock held forever.
+
+The standard solution is to use the lock as a context manager via the with statement, which automatically releases the lock when the block exits.
+
+2. Using Lock as a Context Manager (Recommended)
+Python
+
+
+import threading
+
+class SafeCounter:
+    def __init__(self):
+        self.count = 0
+        self.lock = threading.Lock()
+
+    def increment(self):
+        with self.lock:        # acquires here
+            self.count += 1    # protected section
+            # lock is released automatically on block exit
+
+    def get_count(self):
+        with self.lock:
+            return self.count
+The with self.lock: statement acquires the lock on entry and releases it automatically on exit, even if an exception is raised.
+This is the recommended and idiomatic way to use locks in Python.
+
+Using the with statement allows you to protect exactly which section of the code needs guarding, without worrying about cleanup. Python also provides threading.RLock for re-entrant locking (discussed next).
+
+Lock Types and threading.RLock
+At the core of synchronization in Python lies the concept of locks, which manage access by allowing only one thread to execute a protected section at any given time. Python's threading module provides several lock variants for different use cases.
+Key Lock Types
+threading.Lock: The basic non-re-entrant lock. A thread that already holds the lock will deadlock if it tries to acquire it again.
+threading.RLock (Re-entrant Lock): Allows the same thread to acquire the lock multiple times. It must release it the same number of times before it becomes available to other threads.
+threading.Semaphore: A generalized lock allowing up to N threads to access a section at once.
+threading.Event: Used for signaling between threads rather than exclusive access.
+Python
+
+
+import threading
+
+class SafeCounter:
+    def __init__(self):
+        self.count = 0
+        self.rlock = threading.RLock()
+
+    def increment(self):
+        with self.rlock:         # acquires once
+            self._do_increment() # calls another method that also locks
+
+    def _do_increment(self):
+        with self.rlock:         # same thread acquires again - safe with RLock
+            self.count += 1
+            # No deadlock because RLock allows re-entry by the same thread
+
+    def conditional_reset(self, should_reset):
+        with self.rlock:
+            if should_reset:
+                self.count = 0
+                print("Counter reset.")
+            # rlock released automatically on block exit
+
+c = SafeCounter()
+Drawback
+Using locks removes data races, but over-locking can slow your app or cause deadlocks if locks are acquired in inconsistent order.
+
+While locks help manage exclusive access, they also introduce overhead by forcing threads to wait, especially when only visibility of changes - not full exclusion - is needed.
+
+In such cases, where a full lock might be too heavy, Python provides atomic-style variables that avoid locks entirely.
+
+Thread-Local Storage
+Sometimes you don't want threads to share data at all - each thread should have its own private copy of a variable. Python's threading.local() provides exactly this.
+What it Guarantees
+Any attribute set on a threading.local() object is private to the thread that set it. Other threads see their own separate copy, completely isolated from each other.
+Python
+
+
+import threading
+
+# Each thread gets its own 'request_id' - no sharing, no locking needed
+thread_local = threading.local()
+
+def process_request(request_id):
+    thread_local.request_id = request_id
+    # Safe to access - this is our thread's own copy
+    print(f"Processing request {thread_local.request_id} on {threading.current_thread().name}")
+
+threads = [threading.Thread(target=process_request, args=(i,)) for i in range(5)]
+for t in threads: t.start()
+for t in threads: t.join()
+When to Use
+Each thread needs its own connection (e.g., database connections in a web server).
+Storing per-request context in a multi-threaded HTTP handler.
+Any situation where sharing state between threads would create unnecessary contention.
+
+Because each thread has its own isolated data, there is no race condition possible - and no lock is needed. This makes thread-local storage a powerful tool for writing clean, safe concurrent code.
+
+Atomic Variables with threading
+Python does not ship a built-in atomic integer or boolean like some compiled languages do. However, it provides thread-safe alternatives for common use cases through the queue.Queue class and certain operations that are atomic at the CPython bytecode level. For most practical needs, the recommended pattern is to protect shared state with a Lock.
+
+For a truly atomic counter without explicit locking, Python 3.12+ exposes threading.local-style primitives and the standard library recommends using a Lock-protected counter or leveraging queue.Queue. The pattern below demonstrates a clean atomic counter wrapper commonly used in production:
+Example: Lock-Based Atomic Counter
+Python
+
+
+import threading
+
+class AtomicCounter:
+    """A thread-safe integer counter backed by a Lock."""
+
+    def __init__(self, initial=0):
+        self._value = initial
+        self._lock = threading.Lock()
+
+    def increment(self):
+        """Atomically add 1 to the counter."""
+        with self._lock:
+            # Step 1 - read the current value (under lock)
+            prev = self._value
+
+            # Step 2 - compute the desired next value
+            next_val = prev + 1
+
+            # Step 3 - write back (under the same lock)
+            # No other thread can interleave these steps
+            self._value = next_val
+        return next_val
+
+    def get(self):
+        """Thread-safe read."""
+        with self._lock:
+            return self._value
+
+# Usage
+counter = AtomicCounter()
+
+def task():
+    for _ in range(1000):
+        counter.increment()
+
+t1 = threading.Thread(target=task)
+t2 = threading.Thread(target=task)
+t1.start(); t2.start()
+t1.join(); t2.join()
+
+print(f"Final Count: {counter.get()}")  # Always 2000
+How the Lock Works Here
+The table below shows both threads (U1 and U2) trying to increment the counter simultaneously, and how the lock prevents lost updates.
+Step	Thread U1	Thread U2	Outcome
+acquire lock	U1 acquires	U2 blocks	U1 holds the lock
+read	reads 10	waiting...	U1 sees 10
+write	writes 11, releases lock	waiting...	value is now 11
+U2 unblocks	done	acquires lock, reads 11, writes 12	no lost update
+Pros
+Correct: The lock guarantees that no two threads ever interleave update steps.
+Simple API: Methods like increment() and get() hide the locking detail from callers.
+Cons
+Involves a lock, so there is some overhead compared to hardware CAS in compiled languages.
+For CPU-bound workloads, the GIL and lock together can become a bottleneck - consider multiprocessing for true parallelism.
+
+Lock vs Thread-Local vs Atomic Counter
+Different concurrency tools serve different purposes. Here's a quick comparison to help understand when each approach is appropriate.
+
+Feature	threading.Lock	threading.local()	Lock-based Atomic Counter
+Guarantees Atomicity	✅ (for locked block)	Not applicable	✅
+Prevents Race Conditions	✅	✅ (by isolation)	✅
+Blocking	✅	❌	✅ (briefly)
+Performance	Moderate	High (no sharing)	Moderate
+Use Case	Shared counters, critical sections	Per-thread state (connections, context)	Simple shared counters
+
+25
+
+
+
+
+
